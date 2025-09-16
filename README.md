@@ -147,11 +147,6 @@ POST /run
 
 ---
 
-## 🎥 Demo Video
-
-\[link to your demo video]
-
----
 
 ## 📌 Notes & Known Issues
 
