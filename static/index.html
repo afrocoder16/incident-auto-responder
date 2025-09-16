@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Incident Auto Responder</title>
+  <!-- Tailwind CSS via CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Optional: configure Tailwind here if needed -->
+</head>
+<body class="bg-gray-50 text-gray-800">
+  <main class="mx-auto max-w-7xl p-4 space-y-6">
+    <!-- Header -->
+    <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center space-y-2 sm:space-y-0">
+      <div>
+        <h1 class="text-2xl font-bold">Incident Auto Responder</h1>
+        <p class="text-sm text-gray-600">powered by TiDB Serverless</p>
+      </div>
+      <div class="flex space-x-2 mt-2 sm:mt-0">
+        <span class="px-2 py-1 bg-gray-200 text-xs rounded" aria-label="Vector search status">Vector search on TiDB</span>
+        <span class="px-2 py-1 bg-gray-200 text-xs rounded" aria-label="OCR status">OCR enabled</span>
+      </div>
+    </header>
+
+    <!-- Incident input panel -->
+    <div class="rounded-2xl border p-4 shadow-sm bg-white relative">
+      <!-- Top spinner bar -->
+      <div id="spinner-bar" class="hidden absolute top-0 left-0 h-1 w-full bg-blue-500 animate-pulse"></div>
+      <div class="flex flex-col lg:flex-row gap-4">
+        <!-- Text path -->
+        <div class="flex-1 space-y-2">
+          <textarea id="incident-text" rows="5" placeholder="Paste incident text like AUTH-500 after login on prod" class="w-full border rounded p-2" aria-label="Incident text"></textarea>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <input id="filter-service" type="text" placeholder="Service" class="border rounded p-1" aria-label="Service filter" />
+            <input id="filter-error-code" type="text" placeholder="Error code" class="border rounded p-1" aria-label="Error code filter" />
+            <input id="filter-env" type="text" placeholder="Env" class="border rounded p-1" aria-label="Environment filter" />
+            <input id="filter-keyword" type="text" placeholder="Keyword" class="border rounded p-1" aria-label="Keyword filter" />
+          </div>
+        </div>
+        <!-- Separator for large screens -->
+        <div class="hidden lg:flex flex-col items-center justify-center">
+          <div class="bg-gray-300 h-16 w-px"></div>
+          <span class="px-2 py-1 text-sm text-gray-500">or</span>
+          <div class="bg-gray-300 h-16 w-px"></div>
+        </div>
+        <!-- OCR path -->
+        <div class="flex-1 space-y-2">
+          <input id="ocr-file" type="file" accept="image/*" class="w-full border rounded p-2" aria-label="Upload image for OCR" />
+          <p class="text-sm text-gray-500">Upload a screenshot with an error message or log lines</p>
+        </div>
+      </div>
+      <!-- Options row -->
+      <div class="flex flex-wrap items-center space-x-4 mt-4">
+        <label class="flex items-center space-x-1 text-sm" aria-label="Send to Slack">
+          <input id="opt-slack" type="checkbox" class="form-checkbox" checked />
+          <span>Send to Slack</span>
+        </label>
+        <label class="flex items-center space-x-1 text-sm" aria-label="Create Jira ticket">
+          <input id="opt-jira" type="checkbox" class="form-checkbox" />
+          <span>Create Jira Ticket</span>
+        </label>
+        <span class="text-sm">Confidence threshold: <span id="conf-threshold" class="font-medium"></span></span>
+      </div>
+      <!-- Submit buttons -->
+      <div class="flex space-x-2 mt-4">
+        <button id="btn-run-text" class="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50 flex items-center" aria-label="Run text incident">
+          <span id="btn-run-text-label">Run Text Incident</span>
+          <span id="btn-run-text-spinner" class="btn-spinner hidden ml-2 inline-block border-2 border-t-transparent border-white rounded-full w-4 h-4 animate-spin"></span>
+        </button>
+        <button id="btn-run-ocr" class="bg-blue-600 text-white px-4 py-2 rounded disabled:opacity-50 flex items-center" aria-label="Run OCR incident">
+          <span id="btn-run-ocr-label">Run OCR Incident</span>
+          <span id="btn-run-ocr-spinner" class="btn-spinner hidden ml-2 inline-block border-2 border-t-transparent border-white rounded-full w-4 h-4 animate-spin"></span>
+        </button>
+      </div>
+    </div>
+
+    <!-- Result panel -->
+    <section id="result-panel" class="space-y-4">
+      <h2 class="text-xl font-semibold">Result</h2>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- Outcome card -->
+        <div class="rounded-2xl border p-4 shadow-sm bg-white space-y-2">
+          <h3 class="font-semibold text-lg">Outcome</h3>
+          <div class="space-y-1">
+            <div class="text-sm">Confidence:</div>
+            <div class="flex items-center space-x-2">
+              <div class="relative w-full h-3 bg-gray-200 rounded">
+                <div id="conf-bar" class="absolute top-0 left-0 h-full bg-gray-300 rounded" style="width:0%"></div>
+              </div>
+              <span id="conf-perc" class="text-sm font-medium">0%</span>
+            </div>
+            <div class="flex items-center space-x-2 mt-1">
+              <span class="text-sm">Next action:</span>
+              <span id="next-action" class="px-2 py-1 text-xs font-semibold rounded-full text-white bg-gray-500" aria-label="Next action badge">n/a</span>
+            </div>
+            <div class="flex space-x-2 text-sm mt-1">
+              <span id="run-category" class="px-2 py-1 rounded bg-gray-100" aria-label="Category badge"></span>
+              <span id="run-severity" class="px-2 py-1 rounded bg-gray-100" aria-label="Severity badge"></span>
+            </div>
+            <div class="text-sm">Slack: <span id="slack-status">-</span></div>
+            <div class="text-sm">Jira: <span id="jira-status">-</span></div>
+          </div>
+        </div>
+        <!-- Plan card -->
+        <div class="rounded-2xl border p-4 shadow-sm bg-white space-y-2">
+          <h3 class="font-semibold text-lg">Plan</h3>
+          <div class="text-sm font-medium">Steps:</div>
+          <ul id="plan-steps" class="space-y-1 text-sm"></ul>
+          <div class="text-sm font-medium mt-2">Risks:</div>
+          <ul id="plan-risks" class="space-y-1 text-sm"></ul>
+          <div class="flex flex-wrap space-x-2 mt-2">
+            <button id="copy-plan" class="px-3 py-1 bg-gray-200 text-sm rounded" aria-label="Copy plan">Copy Plan</button>
+            <button id="copy-risks" class="px-3 py-1 bg-gray-200 text-sm rounded" aria-label="Copy risks">Copy Risks</button>
+            <button id="copy-summary" class="px-3 py-1 bg-gray-200 text-sm rounded" aria-label="Copy summary">Copy Summary</button>
+          </div>
+        </div>
+        <!-- Context card -->
+        <div class="rounded-2xl border p-4 shadow-sm bg-white space-y-2">
+          <h3 class="font-semibold text-lg">Context</h3>
+          <div class="overflow-x-auto">
+            <table class="w-full text-sm table-auto border-collapse">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-2 py-1 border text-left">Chunk ID</th>
+                  <th class="px-2 py-1 border text-left">Service</th>
+                  <th class="px-2 py-1 border text-left">Error Code</th>
+                  <th class="px-2 py-1 border text-left">Snippet</th>
+                </tr>
+              </thead>
+              <tbody id="sources-tbody"></tbody>
+            </table>
+          </div>
+          <!-- Enrichment -->
+          <div id="enrichment-box" class="mt-2 hidden">
+            <button id="enrichment-toggle" class="text-blue-600 text-sm underline" aria-label="Toggle enrichment">Show more</button>
+            <div id="enrichment-content" class="mt-1 p-2 bg-gray-50 rounded max-h-24 overflow-hidden text-sm"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- History section -->
+    <section id="history-section" class="space-y-4">
+      <h2 class="text-xl font-semibold">History</h2>
+      <div class="rounded-2xl border p-4 shadow-sm bg-white space-y-4">
+        <div class="flex flex-wrap items-center space-x-2">
+          <button id="refresh-history" class="px-3 py-1 bg-blue-600 text-white rounded" aria-label="Refresh history">Refresh</button>
+          <input id="filter-run-id" type="text" placeholder="Filter by incident_id" class="border p-1 rounded flex-1" aria-label="Filter history by ID" />
+        </div>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm table-auto border-collapse">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-2 py-1 border text-left">Run ID</th>
+                <th class="px-2 py-1 border text-left">Created At</th>
+                <th class="px-2 py-1 border text-left">Confidence</th>
+                <th class="px-2 py-1 border text-left">Next Action</th>
+                <th class="px-2 py-1 border text-left">Slack TS</th>
+                <th class="px-2 py-1 border text-left">Status</th>
+              </tr>
+            </thead>
+            <tbody id="history-tbody"></tbody>
+          </table>
+        </div>
+        <div class="flex justify-between items-center">
+          <button id="history-prev" class="px-3 py-1 bg-gray-200 rounded" aria-label="Previous page">Prev</button>
+          <span id="history-page-info" class="text-sm"></span>
+          <button id="history-next" class="px-3 py-1 bg-gray-200 rounded" aria-label="Next page">Next</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Drawer for run details -->
+    <div id="drawer" class="fixed top-0 right-0 w-full max-w-md h-full bg-white shadow-2xl p-4 transform translate-x-full transition-transform duration-300 z-50">
+      <div class="flex justify-between items-center mb-2">
+        <h3 class="text-lg font-semibold">Run details</h3>
+        <button id="drawer-close" class="text-gray-600 text-2xl leading-none" aria-label="Close drawer">&times;</button>
+      </div>
+      <pre id="drawer-content" class="text-xs overflow-auto h-3/4 border p-2 bg-gray-50 rounded"></pre>
+      <input type="hidden" id="drawer-run-id" />
+      <div class="mt-2">
+        <button id="replay-run" class="px-3 py-1 bg-blue-600 text-white rounded" aria-label="Replay run">Replay this run</button>
+      </div>
+    </div>
+
+    <!-- Toast notification -->
+    <div id="toast" class="fixed top-4 right-4 bg-red-500 text-white px-4 py-2 rounded hidden" aria-live="polite"></div>
+
+
+    <!-- Footer -->
+    <footer class="text-sm text-gray-600 text-center mt-6">
+      Short credits. <a href="#" class="text-blue-600 underline">Devpost entry</a> and <a href="#" class="text-blue-600 underline">Repo</a> when ready.
+    </footer>
+  </main>
+
+  <!-- JavaScript logic -->
+  <script>
+    const state = {
+      lastRun: null,
+      history: [],
+      loading: false,
+      confMin: 0.65,
+      confAuto: 0.8,
+      historyPage: 0,
+      historyPageSize: 10,
+    };
+
+    function showToast(msg) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.classList.remove('hidden');
+      setTimeout(() => {
+        toast.classList.add('hidden');
+      }, 5000);
+    }
+
+    async function fetchJSON(url, opts = {}) {
+      try {
+        const resp = await fetch(url, opts);
+        if (!resp.ok) {
+          const text = await resp.text();
+          throw new Error(text || resp.statusText || 'API error');
+        }
+        const contentType = resp.headers.get('content-type');
+        if (contentType && contentType.indexOf('application/json') !== -1) {
+          return await resp.json();
+        }
+        return null;
+      } catch (err) {
+        showToast(err.message);
+        throw err;
+      }
+    }
+
+
+    async function loadThresholds() {
+    try {
+      const cfg = await fetchJSON('/health');
+      if (cfg) {
+        const newMin = Number(cfg.conf_min);
+        const newAuto = Number(cfg.conf_auto);
+        if (!Number.isNaN(newMin)) state.confMin = newMin;
+        if (!Number.isNaN(newAuto)) state.confAuto = newAuto;
+      }
+    } catch (e) {
+      // keep defaults if /health fails
+    }
+    // Update label after values are set (or left at defaults)
+    document.getElementById('conf-threshold').textContent =
+      `Min: ${state.confMin.toFixed(2)}, Auto: ${state.confAuto.toFixed(2)}`;
+  }
+
+
+    function updateSpinner(loading, buttonId) {
+      const spinnerBar = document.getElementById('spinner-bar');
+      spinnerBar.classList.toggle('hidden', !loading);
+      if (buttonId) {
+        const btnSpinner = document.getElementById(buttonId + '-spinner');
+        if (btnSpinner) {
+          btnSpinner.classList.toggle('hidden', !loading);
+        }
+      } else {
+        // hide both button spinners when not loading a specific button
+        document.querySelectorAll('.btn-spinner').forEach(sp => {
+          sp.classList.add('hidden');
+        });
+      }
+    }
+
+    function renderResult(run) { 
+      state.lastRun = run;
+      if (!run) return;
+      const conf = run.confidence ?? 0;
+      const confBar = document.getElementById('conf-bar');
+      const confPerc = document.getElementById('conf-perc');
+      confBar.style.width = `${(conf * 100).toFixed(1)}%`;
+      confPerc.textContent = `${(conf * 100).toFixed(1)}%`;
+      // Color logic
+      confBar.classList.remove('bg-red-500', 'bg-yellow-500', 'bg-green-500');
+      if (conf < state.confMin) {
+        confBar.classList.add('bg-red-500');
+      } else if (conf < state.confAuto) {
+        confBar.classList.add('bg-yellow-500');
+      } else {
+        confBar.classList.add('bg-green-500');
+      }
+      // Next action badge
+      const nextEl = document.getElementById('next-action');
+      const na = run.next_action || '';
+      nextEl.textContent = na;
+      nextEl.classList.remove('bg-gray-500', 'bg-green-500', 'bg-yellow-500', 'bg-gray-400');
+      if (na === 'auto_fix') {
+        nextEl.classList.add('bg-green-500');
+      } else if (na === 'needs_human') {
+        nextEl.classList.add('bg-yellow-500');
+      } else {
+        nextEl.classList.add('bg-gray-500');
+      }
+      // Category and severity
+      document.getElementById('run-category').textContent = run.plan?.category || '';
+      document.getElementById('run-severity').textContent = run.plan?.severity || '';
+      // Slack and Jira status
+      document.getElementById('slack-status').textContent = run.slack_ts ? 'Sent' : 'Not sent';
+      const jira = run.jira || null;
+      if (jira) {
+        document.getElementById('jira-status').textContent = jira.key || 'Created';
+      } else {
+        document.getElementById('jira-status').textContent = 'Not created';
+      }
+      // Plan steps
+      const stepsList = document.getElementById('plan-steps');
+      stepsList.innerHTML = '';
+      (run.plan?.steps || []).forEach(step => {
+        const li = document.createElement('li');
+        li.className = 'flex items-start space-x-2';
+        li.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0 text-green-500 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7" /></svg><span>${step}</span>`;
+        stepsList.appendChild(li);
+      });
+      // Risks
+      const risksList = document.getElementById('plan-risks');
+      risksList.innerHTML = '';
+      (run.plan?.risks || []).forEach(risk => {
+        const li = document.createElement('li');
+        li.className = 'flex items-start space-x-2';
+        li.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0 text-yellow-500 mt-0.5" viewBox="0 0 20 20" fill="currentColor"><path d="M8.257 3.099c.765-1.36 2.721-1.36 3.486 0l6.092 10.824c.75 1.334-.213 2.999-1.742 2.999H3.907c-1.528 0-2.492-1.665-1.742-2.999L8.257 3.1zM11 13a1 1 0 11-2 0 1 1 0 012 0zM11 7a1 1 0 00-2 0v3a1 1 0 002 0V7z" /></svg><span>${risk}</span>`;
+        risksList.appendChild(li);
+      });
+      
+      // Sources
+      const tbody = document.getElementById('sources-tbody');
+      tbody.innerHTML = '';
+      const rows = (run.previews || run.plan?.previews || []);
+      rows.forEach(src => {
+        const tr = document.createElement('tr');
+        tr.className = 'hover:bg-gray-50';
+        const snippet = src.snippet || '';
+        const truncated = snippet.length > 120 ? snippet.slice(0, 120) + '…' : snippet;
+        tr.innerHTML = `
+          <td class="px-2 py-1 border">${src.id ?? src.chunk_id ?? ''}</td>
+          <td class="px-2 py-1 border">${src.service || ''}</td>
+          <td class="px-2 py-1 border">${src.error_code || ''}</td>
+          <td class="px-2 py-1 border truncate" title="${snippet.replace(/"/g, '&quot;')}">${truncated}</td>
+        `;
+        tbody.appendChild(tr);
+      });
+
+
+      // Enrichment
+      const enrichmentBox = document.getElementById('enrichment-box');
+      const enrichmentContent = document.getElementById('enrichment-content');
+      const enr = run.plan?.enrichment;
+      if (enr && enr.sample) {
+        enrichmentContent.textContent = enr.sample;
+        enrichmentBox.classList.remove('hidden');
+        enrichmentContent.classList.add('max-h-24');
+        document.getElementById('enrichment-toggle').textContent = 'Show more';
+      } else {
+        enrichmentBox.classList.add('hidden');
+      }
+    }
+
+    function renderHistory() {
+      const tbody = document.getElementById('history-tbody');
+      tbody.innerHTML = '';
+      let runs = state.history;
+      const filterVal = document.getElementById('filter-run-id').value.trim().toLowerCase();
+      if (filterVal) {
+        runs = runs.filter(run => ((run.id ?? run.run_id ?? '') + '').toLowerCase().includes(filterVal));
+      }
+      const totalPages = Math.max(1, Math.ceil(runs.length / state.historyPageSize));
+      state.historyPage = Math.min(state.historyPage, totalPages - 1);
+      const start = state.historyPage * state.historyPageSize;
+      const end = start + state.historyPageSize;
+      const rows = runs.slice(start, end);
+
+      rows.forEach(run => {
+        const tr = document.createElement('tr');
+        tr.className = 'cursor-pointer hover:bg-gray-50';
+      
+        const runId = run.id ?? run.run_id ?? '';
+        let createdAt = '';
+        if (run.created_at) {
+          const d = new Date(run.created_at);
+          createdAt = isNaN(d.getTime()) ? String(run.created_at) : d.toLocaleString();
+        }
+      
+        const confDisplay = (typeof run.confidence === 'number')
+          ? (run.confidence * 100).toFixed(1) + '%'
+          : '—';
+      
+        const next = run.next_action ?? '—';
+        const slack = run.slack_ts ?? '';
+        const status = run.action_status ?? '';
+      
+        tr.innerHTML = `
+          <td class="px-2 py-1 border">${runId}</td>
+          <td class="px-2 py-1 border">${createdAt}</td>
+          <td class="px-2 py-1 border">${confDisplay}</td>
+          <td class="px-2 py-1 border">${next}</td>
+          <td class="px-2 py-1 border">${slack}</td>
+          <td class="px-2 py-1 border">${status}</td>
+        `;
+        tr.addEventListener('click', () => { if (runId) openDrawer(runId); });
+        tbody.appendChild(tr);
+      });
+
+      
+      document.getElementById('history-page-info').textContent = `Page ${state.historyPage + 1} of ${totalPages}`;
+      document.getElementById('history-prev').disabled = state.historyPage === 0;
+      document.getElementById('history-next').disabled = state.historyPage >= (totalPages - 1);
+    }
+
+
+    function fmt(dt) {
+      try { return new Date(dt).toLocaleString(); } catch { return dt; }
+    }
+
+    async function loadRuns() {
+      const q = (document.getElementById('filter-run-id')?.value || '').trim();
+      const url = q
+        ? `/runs?incident_id=${encodeURIComponent(q)}&limit=100`
+        : `/runs?limit=100`;
+
+      try {
+        const data = await fetchJSON(url);
+        const rows = Array.isArray(data) ? data : (data && data.runs ? data.runs : []);
+        const tbody = document.getElementById('history-tbody');
+        tbody.innerHTML = '';
+
+        (rows || []).forEach(r => {
+          const runId = r.id ?? r.run_id ?? '';
+          const tr = document.createElement('tr');
+          tr.className = 'cursor-pointer hover:bg-gray-50';
+          tr.innerHTML = `
+            <td class="px-2 py-1 border">${runId}</td>
+            <td class="px-2 py-1 border">${fmt(r.created_at)}</td>
+            <td class="px-2 py-1 border">${typeof r.confidence === 'number' ? (r.confidence * 100).toFixed(1) + '%' : '—'}</td>
+            <td class="px-2 py-1 border">${r.next_action || '—'}</td>
+            <td class="px-2 py-1 border">${r.slack_ts || ''}</td>
+            <td class="px-2 py-1 border">${r.action_status || ''}</td>
+          `;
+          tr.addEventListener('click', () => { if (runId) openDrawer(runId); });
+          tbody.appendChild(tr);
+        });
+
+        // since loadRuns shows a single page, lock pagination to 1/1
+        document.getElementById('history-page-info').textContent = `Page 1 of 1`;
+        document.getElementById('history-prev').disabled = true;
+        document.getElementById('history-next').disabled = true;
+      } catch {
+        document.getElementById('history-tbody').innerHTML =
+          `<tr><td colspan="6" class="px-3 py-2 text-gray-500">No runs yet.</td></tr>`;
+      }
+    }
+
+
+    async function loadHistory() {
+      try {
+        const data = await fetchJSON('/runs?limit=100');
+        // The API may return an array or object {runs: [...]}
+        state.history = Array.isArray(data) ? data : (data && data.runs ? data.runs : []);
+        state.historyPage = 0;
+        renderHistory();
+      } catch (err) {
+        // error already handled in fetchJSON
+      }
+    }
+
+    async function onRunText() {
+      const text = document.getElementById('incident-text').value.trim();
+      const service = document.getElementById('filter-service').value.trim();
+      const errorCode = document.getElementById('filter-error-code').value.trim();
+      const env = document.getElementById('filter-env').value.trim();
+      const keyword = document.getElementById('filter-keyword').value.trim();
+      const filters = {};
+      if (service) filters.service = service;
+      if (errorCode) filters.error_code = errorCode;
+      if (env) filters.env = env;
+      if (keyword) filters.keyword = keyword;
+      const body = {
+        text: text,
+        top_k: 5,
+        filters: Object.keys(filters).length ? filters : null,
+        post_to_slack: document.getElementById('opt-slack').checked,
+        create_jira: document.getElementById('opt-jira').checked,
+      };
+      state.loading = true;
+      updateSpinner(true, 'btn-run-text');
+      try {
+        const run = await fetchJSON('/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        renderResult(run);
+        await loadHistory();
+        document.getElementById('result-panel').scrollIntoView({ behavior: 'smooth' });
+      } catch (err) {
+        // error handled in fetchJSON
+      }
+      state.loading = false;
+      updateSpinner(false, 'btn-run-text');
+    }
+
+    async function onRunOCR() {
+      const fileInput = document.getElementById('ocr-file');
+      if (!fileInput.files || !fileInput.files[0]) {
+        showToast('Please select an image.');
+        return;
+      }
+      const file = fileInput.files[0];
+      if (file.size > 5 * 1024 * 1024) {
+        showToast('Image too large (max 5MB).');
+        return;
+      }
+
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('top_k', '5');
+      fd.append('post_to_slack', document.getElementById('opt-slack').checked);
+
+      // collect same filters as text run
+      const service = document.getElementById('filter-service').value.trim();
+      const errorCode = document.getElementById('filter-error-code').value.trim();
+      const env = document.getElementById('filter-env').value.trim();
+      const keyword = document.getElementById('filter-keyword').value.trim();
+      const filters = {};
+      if (service) filters.service = service;
+      if (errorCode) filters.error_code = errorCode;
+      if (env) filters.env = env;
+      if (keyword) filters.keyword = keyword;
+      if (Object.keys(filters).length) {
+        fd.append('filters', JSON.stringify(filters));
+      }
+
+      fd.append('create_jira', document.getElementById('opt-jira').checked);
+
+      state.loading = true;
+      updateSpinner(true, 'btn-run-ocr');
+      try {
+        const run = await fetchJSON('/ocr_run', {
+          method: 'POST',
+          body: fd,
+        });
+        renderResult(run);
+        await loadHistory();
+        document.getElementById('result-panel').scrollIntoView({ behavior: 'smooth' });
+      } catch (err) {
+        // error handled in fetchJSON
+      }
+      state.loading = false;
+      updateSpinner(false, 'btn-run-ocr');
+    }
+
+    async function openDrawer(runId) {
+      if (!runId) return;
+      const drawer = document.getElementById('drawer');
+      drawer.classList.remove('translate-x-full');
+      try {
+        const run = await fetchJSON(`/runs/${runId}`);
+        document.getElementById('drawer-content').textContent = JSON.stringify(run, null, 2);
+        document.getElementById('drawer-run-id').value = runId;
+      } catch (err) {
+        // error handled
+      }
+    }
+
+    function closeDrawer() {
+      const drawer = document.getElementById('drawer');
+      drawer.classList.add('translate-x-full');
+    }
+
+    async function onReplay() {
+      const runId = document.getElementById('drawer-run-id').value;
+      if (!runId) return;
+      state.loading = true;
+      updateSpinner(true);
+      try {
+        // post_to_slack=true by default
+        const replayRes = await fetchJSON(`/runs/${runId}/replay?post_to_slack=true`, { method: 'POST' });
+
+        // Some backends return { run_id, ... }, others might return { id, ... } or the full run.
+        // Capture a usable ID if present.
+        const newId = (replayRes && (replayRes.run_id || replayRes.id)) ? (replayRes.run_id || replayRes.id) : null;
+
+        closeDrawer();
+        await loadHistory();
+        showToast('Replayed run successfully.');
+
+        // If we got the new run id, open the drawer on it.
+        if (newId) {
+          openDrawer(newId);
+        }
+
+      } catch (err) {
+        // error handled
+      }
+      state.loading = false;
+      updateSpinner(false);
+    }
+
+    function init() {
+      document.getElementById('btn-run-text').addEventListener('click', onRunText);
+      document.getElementById('btn-run-ocr').addEventListener('click', onRunOCR);
+      document.getElementById('refresh-history').addEventListener('click', loadRuns);
+      document.getElementById('filter-run-id').addEventListener('input', () => {
+        
+        state.historyPage = 0;
+        renderHistory();
+      });
+      document.getElementById('history-prev').addEventListener('click', () => {
+        if (state.historyPage > 0) {
+          state.historyPage--;
+          renderHistory();
+        }
+      });
+      document.getElementById('history-next').addEventListener('click', () => {
+        const runs = state.history;
+        const filterVal = document.getElementById('filter-run-id').value.trim().toLowerCase();
+        const filteredRuns = filterVal
+          ? runs.filter(run => ((run.id ?? run.run_id ?? '') + '').toLowerCase().includes(filterVal))
+          : runs;
+        const totalPages = Math.max(1, Math.ceil(filteredRuns.length / state.historyPageSize));
+        if (state.historyPage < totalPages - 1) {
+          state.historyPage++;
+          renderHistory();
+        }
+      });
+
+      document.getElementById('drawer-close').addEventListener('click', closeDrawer);
+      document.getElementById('replay-run').addEventListener('click', onReplay);
+      // Copy buttons
+      document.getElementById('copy-plan').addEventListener('click', () => {
+        const steps = (state.lastRun?.plan?.steps || []).join('\n');
+        navigator.clipboard.writeText(steps).then(() => {
+          showToast('Plan copied to clipboard');
+        }).catch(() => {
+          showToast('Failed to copy plan');
+        });
+      });
+      document.getElementById('copy-risks').addEventListener('click', () => {
+        const risks = (state.lastRun?.plan?.risks || []).join('\n');
+        navigator.clipboard.writeText(risks).then(() => {
+          showToast('Risks copied to clipboard');
+        }).catch(() => {
+          showToast('Failed to copy risks');
+        });
+      });
+      document.getElementById('copy-summary').addEventListener('click', () => {
+        const run = state.lastRun || {};
+        const conf = (typeof run.confidence === 'number') ? (run.confidence * 100).toFixed(1) + '%' : 'n/a';
+        const na   = run.next_action ?? 'n/a';
+        const cat  = run.plan?.category ?? '';
+        const sev  = run.plan?.severity ?? '';
+      
+        const summary = `Confidence: ${conf}, next action: ${na}, category: ${cat}, severity: ${sev}`;
+        navigator.clipboard.writeText(summary).then(() => {
+          showToast('Summary copied');
+        }).catch(() => {
+          showToast('Failed to copy summary');
+        });
+      });
+
+      // Enrichment toggle
+      document.getElementById('enrichment-toggle').addEventListener('click', () => {
+        const content = document.getElementById('enrichment-content');
+        if (content.classList.contains('max-h-24')) {
+          content.classList.remove('max-h-24');
+          document.getElementById('enrichment-toggle').textContent = 'Show less';
+        } else {
+          content.classList.add('max-h-24');
+          document.getElementById('enrichment-toggle').textContent = 'Show more';
+        }
+      });
+      // Initialize conf threshold label
+      loadThresholds();
+      // Load history on startup
+      loadRuns();
+    }
+    document.addEventListener('DOMContentLoaded', init);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeDrawer();
+    });
+
+  </script>
+</body>
+
+
+</html>
